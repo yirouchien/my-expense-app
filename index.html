@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111827" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <title>我的日常記帳</title>
+  <style>
+    :root { color-scheme: light dark; }
+    *{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f3f4f6;color:#111827}
+    .wrap{max-width:720px;margin:auto;padding:16px 14px 96px}.card{background:white;border-radius:18px;padding:16px;box-shadow:0 6px 24px rgba(0,0,0,.06);margin-bottom:14px}
+    h1{font-size:28px;margin:6px 0 2px}.sub{color:#6b7280;font-size:14px}.summary{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sum{padding:14px;border-radius:14px;background:#f9fafb}.sum b{display:block;font-size:24px;margin-top:4px}
+    label{font-size:13px;color:#6b7280;display:block;margin-bottom:5px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.full{grid-column:1/-1}
+    input,select,button{width:100%;font:inherit;border-radius:12px;border:1px solid #d1d5db;padding:12px;background:white;color:#111827} button{border:none;background:#111827;color:white;font-weight:700;cursor:pointer}.secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:#991b1b}
+    .payer-buttons{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.payer-btn{background:#e5e7eb;color:#111827;padding:10px 6px;font-size:14px}.payer-btn.active{background:#111827;color:white}.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+    .row{padding:14px 0;border-bottom:1px solid #e5e7eb}.row:last-child{border-bottom:none}.topline{display:flex;gap:8px;justify-content:space-between;align-items:flex-start}.item{font-weight:800;font-size:18px}.amt{font-weight:800;white-space:nowrap}.meta{color:#6b7280;font-size:13px;margin-top:5px;line-height:1.5}.actions{display:flex;gap:8px;margin-top:10px}.actions button{padding:8px 10px;font-size:13px}
+    .toolbar{display:grid;grid-template-columns:1fr 1fr;gap:10px}.empty{text-align:center;color:#9ca3af;padding:28px 0}.badge{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:999px;padding:3px 8px;font-size:12px;margin-left:6px}.section-title{font-weight:800;margin-bottom:10px}.small{font-size:12px;color:#6b7280}.hidden{display:none}
+    @media (max-width:430px){.payer-buttons{grid-template-columns:repeat(2,1fr)}}
+    @media (prefers-color-scheme: dark){body{background:#111827;color:#f9fafb}.card{background:#1f2937}.sum{background:#111827}.sub,label,.meta,.small{color:#9ca3af}input,select{background:#111827;color:#f9fafb;border-color:#374151}.row{border-color:#374151}.secondary,.payer-btn{background:#374151;color:#fff}.payer-btn.active{background:#f9fafb;color:#111827}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>💰 我的日常記帳</h1>
+    <div class="sub">日常消費、旅遊支出都可以記。資料只存在這台裝置。</div>
+  </div>
+
+  <div class="card summary">
+    <div class="sum"><span>台幣總支出</span><b id="totalTWD">NT$0</b></div>
+    <div class="sum"><span>本月支出</span><b id="monthTWD">NT$0</b></div>
+  </div>
+
+  <div class="card">
+    <div class="grid">
+      <div><label>日期</label><input id="date" type="date" /></div>
+      <div><label>付款方式</label><select id="method"><option>刷卡</option><option>現金</option><option>行動支付</option><option>轉帳</option></select></div>
+      <div><label>分類</label><select id="category"><option>餐飲</option><option>交通</option><option>購物</option><option>生活</option><option>娛樂</option><option>醫療</option><option>旅遊</option><option>其他</option></select></div>
+      <div><label>台幣</label><input id="twd" inputmode="decimal" placeholder="例如 350" /></div>
+      <div class="full"><label>項目</label><input id="item" placeholder="例如：午餐、加油、超商、藥妝" /></div>
+      <div class="full"><label>地點</label><input id="place" placeholder="例如：斗六、公司附近、福岡" /></div>
+
+      <div class="full">
+        <label>付款人</label>
+        <div class="payer-buttons" id="payerButtons"></div>
+      </div>
+
+      <div class="full"><button class="secondary" id="toggleJPY">＋ 日本旅遊／外幣欄位</button></div>
+      <div id="jpyArea" class="full hidden">
+        <div class="grid">
+          <div><label>日幣（選填）</label><input id="jpy" inputmode="decimal" placeholder="5000" /></div>
+          <div><label>匯率（日幣 ×）</label><input id="rate" inputmode="decimal" value="0.215" /></div>
+        </div>
+        <div class="small" style="margin-top:6px">輸入日幣後，如果台幣欄位是空的，會自動換算。</div>
+      </div>
+
+      <div class="full"><button id="saveBtn">＋ 新增一筆</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">付款人統計</div>
+    <div id="payerStats" class="small">尚無資料</div>
+  </div>
+
+  <div class="card">
+    <button class="secondary" id="toggleSettings">⚙️ 設定付款人按鈕</button>
+    <div id="settings" class="hidden">
+      <div class="settings-grid">
+        <input class="payerName" data-i="0" placeholder="付款人 1" />
+        <input class="payerName" data-i="1" placeholder="付款人 2" />
+        <input class="payerName" data-i="2" placeholder="付款人 3" />
+        <input class="payerName" data-i="3" placeholder="付款人 4" />
+      </div>
+      <button id="savePayers" style="margin-top:10px">儲存付款人</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <button class="secondary" id="exportBtn">匯出 CSV</button>
+      <button class="danger" id="clearBtn">清空全部</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center"><strong>消費紀錄</strong><span class="badge" id="count">0 筆</span></div>
+    <div id="list"></div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const KEY='daily_expenses_v2';
+const PAYER_KEY='daily_expense_payers_v1';
+let expenses=JSON.parse(localStorage.getItem(KEY)||'[]');
+let payers=JSON.parse(localStorage.getItem(PAYER_KEY)||'["我","家人1","家人2","家人3"]');
+let selectedPayer=payers[0]||'我';
+$('date').value=new Date().toISOString().slice(0,10);
+
+function renderPayerButtons(){
+  $('payerButtons').innerHTML=payers.map(p=>`<button type="button" class="payer-btn ${p===selectedPayer?'active':''}" data-payer="${esc(p)}">${esc(p)}</button>`).join('');
+  document.querySelectorAll('.payer-btn').forEach(b=>b.onclick=()=>{selectedPayer=b.dataset.payer;renderPayerButtons();});
+  document.querySelectorAll('.payerName').forEach(inp=>inp.value=payers[+inp.dataset.i]||'');
+}
+
+$('toggleJPY').onclick=()=>$('jpyArea').classList.toggle('hidden');
+$('toggleSettings').onclick=()=>$('settings').classList.toggle('hidden');
+$('savePayers').onclick=()=>{
+  const vals=[...document.querySelectorAll('.payerName')].map(x=>x.value.trim()).filter(Boolean);
+  payers=vals.length?vals:['我']; selectedPayer=payers[0];
+  localStorage.setItem(PAYER_KEY,JSON.stringify(payers)); renderPayerButtons(); alert('付款人已儲存');
+};
+
+$('jpy').addEventListener('input',()=>{
+  const j=parseFloat($('jpy').value)||0,r=parseFloat($('rate').value)||0;
+  if(j&&r&&!$('twd').value) $('twd').value=Math.round(j*r);
+});
+$('rate').addEventListener('input',()=>$('jpy').dispatchEvent(new Event('input')));
+
+$('saveBtn').onclick=()=>{
+  const item=$('item').value.trim(); if(!item){alert('請輸入項目'); return;}
+  const twd=+$('twd').value||0; if(!twd && !+$('jpy').value){alert('請輸入金額'); return;}
+  const e={id:Date.now(),date:$('date').value,category:$('category').value,item,place:$('place').value.trim(),method:$('method').value,jpy:+$('jpy').value||0,twd,payer:selectedPayer};
+  expenses.unshift(e); persist();
+  ['item','place','jpy','twd'].forEach(x=>$(x).value='');
+};
+
+function persist(){localStorage.setItem(KEY,JSON.stringify(expenses));render();}
+function money(n){return Math.round(n).toLocaleString('zh-TW')}
+function esc(s=''){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+function render(){
+  const total=expenses.reduce((a,b)=>a+(+b.twd||0),0);
+  const ym=new Date().toISOString().slice(0,7);
+  const month=expenses.filter(e=>(e.date||'').startsWith(ym)).reduce((a,b)=>a+(+b.twd||0),0);
+  $('totalTWD').textContent='NT$'+money(total); $('monthTWD').textContent='NT$'+money(month); $('count').textContent=expenses.length+' 筆';
+  const stats={}; expenses.forEach(e=>stats[e.payer||'未填']=(stats[e.payer||'未填']||0)+(+e.twd||0));
+  $('payerStats').innerHTML=Object.keys(stats).length?Object.entries(stats).sort((a,b)=>b[1]-a[1]).map(([p,v])=>`<div style="display:flex;justify-content:space-between;padding:6px 0"><span>${esc(p)}</span><strong>NT$${money(v)}</strong></div>`).join(''):'尚無資料';
+  $('list').innerHTML=expenses.length?expenses.map(e=>`<div class="row"><div class="topline"><div><div class="item">${esc(e.item)}</div><div class="meta">${esc(e.date)}｜${esc(e.category||'其他')}｜${esc(e.place||'未填地點')}<br>${esc(e.method)}｜付款人：${esc(e.payer||'未填')}</div></div><div class="amt">NT$${money(e.twd)}${e.jpy?`<div class="meta" style="text-align:right">¥${money(e.jpy)}</div>`:''}</div></div><div class="actions"><button class="danger" onclick="del(${e.id})">刪除</button></div></div>`).join(''):'<div class="empty">還沒有紀錄，先新增第一筆吧。</div>';
+}
+window.del=id=>{expenses=expenses.filter(x=>x.id!==id);persist();}
+$('clearBtn').onclick=()=>{if(confirm('確定要清空全部記帳資料嗎？')){expenses=[];persist();}}
+$('exportBtn').onclick=()=>{
+ const rows=[['日期','分類','項目','地點','付款方式','日幣','台幣','付款人'],...expenses.map(e=>[e.date,e.category,e.item,e.place,e.method,e.jpy,e.twd,e.payer])];
+ const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n');
+ const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='我的日常記帳.csv';a.click();URL.revokeObjectURL(a.href);
+};
+if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
+renderPayerButtons(); render();
+</script>
+</body>
+</html>
