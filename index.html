@@ -24,7 +24,7 @@
 <div class="wrap">
   <div class="card">
     <h1>💰 我的日常記帳</h1>
-    <div class="sub">日常消費、旅遊支出都可以記。資料只存在這台裝置。</div>
+    <div class="sub">日常消費、旅遊支出都可以記。☁️ Google 雲端同步｜iPhone、Windows 共用同一份帳本。</div>
   </div>
 
   <div class="card summary">
@@ -33,10 +33,21 @@
   </div>
 
   <div class="card">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+      <div><strong>雲端同步</strong><div id="syncStatus" class="small">準備連線…</div></div>
+      <button class="secondary" id="refreshBtn" style="width:auto;padding:9px 14px">↻ 重新整理</button>
+    </div>
+    <div id="migrationBox" class="hidden" style="margin-top:12px">
+      <div class="small">偵測到這台 iPhone / 瀏覽器以前的本機記帳資料，可上傳到 Google Sheet。</div>
+      <button id="migrateBtn" style="margin-top:8px">☁️ 將舊資料上傳到 Google 雲端</button>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="grid">
       <div><label>日期</label><input id="date" type="date" /></div>
       <div><label>付款方式</label><select id="method"><option>刷卡</option><option>現金</option><option>行動支付</option><option>轉帳</option></select></div>
-      <div><label>分類</label><select id="category"></option><option>餐飲</option><option>教育</option><option>交通</option><option>購物</option><option>生活</option><option>娛樂</option><option>醫療</option><option>旅遊</option><option>其他</option></select></div>
+      <div><label>分類</label><select id="category"><option>餐飲</option><option>交通</option><option>購物</option><option>生活</option><option>娛樂</option><option>教育</option><option>醫療</option><option>旅遊</option><option>其他</option></select></div>
       <div><label>台幣</label><input id="twd" inputmode="decimal" placeholder="例如 350" /></div>
       <div class="full"><label>項目</label><input id="item" placeholder="例如：午餐、加油、超商、藥妝" /></div>
       <div class="full"><label>地點</label><input id="place" placeholder="例如：斗六、公司附近、福岡" /></div>
@@ -80,7 +91,7 @@
   <div class="card">
     <div class="toolbar">
       <button class="secondary" id="exportBtn">匯出 CSV</button>
-      <button class="danger" id="clearBtn">清空全部</button>
+      <button class="danger" id="clearBtn">刪除雲端全部資料</button>
     </div>
   </div>
 
@@ -90,63 +101,302 @@
   </div>
 </div>
 <script>
-const $=id=>document.getElementById(id);
-const KEY='daily_expenses_v2';
-const PAYER_KEY='daily_expense_payers_v1';
-let expenses=JSON.parse(localStorage.getItem(KEY)||'[]');
-let payers=JSON.parse(localStorage.getItem(PAYER_KEY)||'["我","家人1","家人2","家人3"]');
-let selectedPayer=payers[0]||'我';
-$('date').value=new Date().toISOString().slice(0,10);
+const API_URL = "https://script.google.com/macros/s/AKfycbxT9nTXZG7kDm2eH4aiu_JrcKEudZMXECd2E6n3wH17FCzxrz3wi42S4WOi1UgXpMf_lw/exec";
+const $ = id => document.getElementById(id);
+const OLD_KEY = 'daily_expenses_v2';
+const PAYER_KEY = 'daily_expense_payers_v1';
+const MIGRATED_KEY = 'daily_expenses_cloud_migrated_v1';
+
+let expenses = [];
+let payers = JSON.parse(localStorage.getItem(PAYER_KEY) || '["我","家人1","家人2","家人3"]');
+let selectedPayer = payers[0] || '我';
+let editingId = null;
+
+$('date').value = localToday();
+
+function localToday(){
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+function setStatus(text, ok=true){
+  $('syncStatus').textContent = text;
+  $('syncStatus').style.color = ok ? '' : '#b91c1c';
+}
 
 function renderPayerButtons(){
-  $('payerButtons').innerHTML=payers.map(p=>`<button type="button" class="payer-btn ${p===selectedPayer?'active':''}" data-payer="${esc(p)}">${esc(p)}</button>`).join('');
-  document.querySelectorAll('.payer-btn').forEach(b=>b.onclick=()=>{selectedPayer=b.dataset.payer;renderPayerButtons();});
-  document.querySelectorAll('.payerName').forEach(inp=>inp.value=payers[+inp.dataset.i]||'');
+  $('payerButtons').innerHTML = payers.map(p =>
+    `<button type="button" class="payer-btn ${p===selectedPayer?'active':''}" data-payer="${esc(p)}">${esc(p)}</button>`
+  ).join('');
+  document.querySelectorAll('.payer-btn').forEach(b => b.onclick = () => {
+    selectedPayer = b.dataset.payer;
+    renderPayerButtons();
+  });
+  document.querySelectorAll('.payerName').forEach(inp => inp.value = payers[+inp.dataset.i] || '');
 }
 
-$('toggleJPY').onclick=()=>$('jpyArea').classList.toggle('hidden');
-$('toggleSettings').onclick=()=>$('settings').classList.toggle('hidden');
-$('savePayers').onclick=()=>{
-  const vals=[...document.querySelectorAll('.payerName')].map(x=>x.value.trim()).filter(Boolean);
-  payers=vals.length?vals:['我']; selectedPayer=payers[0];
-  localStorage.setItem(PAYER_KEY,JSON.stringify(payers)); renderPayerButtons(); alert('付款人已儲存');
+$('toggleJPY').onclick = () => $('jpyArea').classList.toggle('hidden');
+$('toggleSettings').onclick = () => $('settings').classList.toggle('hidden');
+
+$('savePayers').onclick = () => {
+  const vals = [...document.querySelectorAll('.payerName')].map(x=>x.value.trim()).filter(Boolean);
+  payers = vals.length ? vals : ['我'];
+  selectedPayer = payers[0];
+  localStorage.setItem(PAYER_KEY, JSON.stringify(payers));
+  renderPayerButtons();
+  alert('付款人按鈕已儲存在這台裝置');
 };
 
-$('jpy').addEventListener('input',()=>{
-  const j=parseFloat($('jpy').value)||0,r=parseFloat($('rate').value)||0;
-  if(j&&r&&!$('twd').value) $('twd').value=Math.round(j*r);
+$('jpy').addEventListener('input', () => {
+  const j = parseFloat($('jpy').value)||0;
+  const r = parseFloat($('rate').value)||0;
+  if(j && r && !$('twd').value) $('twd').value = Math.round(j*r);
 });
-$('rate').addEventListener('input',()=>$('jpy').dispatchEvent(new Event('input')));
+$('rate').addEventListener('input', () => $('jpy').dispatchEvent(new Event('input')));
 
-$('saveBtn').onclick=()=>{
-  const item=$('item').value.trim(); if(!item){alert('請輸入項目'); return;}
-  const twd=+$('twd').value||0; if(!twd && !+$('jpy').value){alert('請輸入金額'); return;}
-  const e={id:Date.now(),date:$('date').value,category:$('category').value,item,place:$('place').value.trim(),method:$('method').value,jpy:+$('jpy').value||0,twd,payer:selectedPayer};
-  expenses.unshift(e); persist();
-  ['item','place','jpy','twd'].forEach(x=>$(x).value='');
-};
-
-function persist(){localStorage.setItem(KEY,JSON.stringify(expenses));render();}
-function money(n){return Math.round(n).toLocaleString('zh-TW')}
-function esc(s=''){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
-function render(){
-  const total=expenses.reduce((a,b)=>a+(+b.twd||0),0);
-  const ym=new Date().toISOString().slice(0,7);
-  const month=expenses.filter(e=>(e.date||'').startsWith(ym)).reduce((a,b)=>a+(+b.twd||0),0);
-  $('totalTWD').textContent='NT$'+money(total); $('monthTWD').textContent='NT$'+money(month); $('count').textContent=expenses.length+' 筆';
-  const stats={}; expenses.forEach(e=>stats[e.payer||'未填']=(stats[e.payer||'未填']||0)+(+e.twd||0));
-  $('payerStats').innerHTML=Object.keys(stats).length?Object.entries(stats).sort((a,b)=>b[1]-a[1]).map(([p,v])=>`<div style="display:flex;justify-content:space-between;padding:6px 0"><span>${esc(p)}</span><strong>NT$${money(v)}</strong></div>`).join(''):'尚無資料';
-  $('list').innerHTML=expenses.length?expenses.map(e=>`<div class="row"><div class="topline"><div><div class="item">${esc(e.item)}</div><div class="meta">${esc(e.date)}｜${esc(e.category||'其他')}｜${esc(e.place||'未填地點')}<br>${esc(e.method)}｜付款人：${esc(e.payer||'未填')}</div></div><div class="amt">NT$${money(e.twd)}${e.jpy?`<div class="meta" style="text-align:right">¥${money(e.jpy)}</div>`:''}</div></div><div class="actions"><button class="danger" onclick="del(${e.id})">刪除</button></div></div>`).join(''):'<div class="empty">還沒有紀錄，先新增第一筆吧。</div>';
+async function apiPost(payload){
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: {'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(payload),
+    redirect: 'follow'
+  });
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if(!data.success) throw new Error(data.message || 'Google 雲端操作失敗');
+  return data;
 }
-window.del=id=>{expenses=expenses.filter(x=>x.id!==id);persist();}
-$('clearBtn').onclick=()=>{if(confirm('確定要清空全部記帳資料嗎？')){expenses=[];persist();}}
-$('exportBtn').onclick=()=>{
- const rows=[['日期','分類','項目','地點','付款方式','日幣','台幣','付款人'],...expenses.map(e=>[e.date,e.category,e.item,e.place,e.method,e.jpy,e.twd,e.payer])];
- const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n');
- const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='我的日常記帳.csv';a.click();URL.revokeObjectURL(a.href);
+
+async function loadExpenses(){
+  setStatus('正在從 Google 雲端讀取…');
+  try{
+    const res = await fetch(API_URL + '?action=list&t=' + Date.now(), {cache:'no-store'});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if(!data.success) throw new Error(data.message || '讀取失敗');
+    expenses = (data.data || []).map(e => ({
+      id: String(e.id || ''),
+      date: e.date || '',
+      category: e.category || '其他',
+      item: e.item || '',
+      place: e.location || '',
+      method: e.paymentMethod || '',
+      jpy: Number(e.jpy)||0,
+      twd: Number(e.twd)||0,
+      payer: e.payer || ''
+    })).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+    render();
+    setStatus(`已同步 Google 雲端｜${expenses.length} 筆`);
+  }catch(err){
+    console.error(err);
+    setStatus('無法連線 Google 雲端：' + err.message, false);
+  }
+}
+
+$('refreshBtn').onclick = loadExpenses;
+
+$('saveBtn').onclick = async () => {
+  const item = $('item').value.trim();
+  if(!item){ alert('請輸入項目'); return; }
+  const twd = +$('twd').value || 0;
+  const jpy = +$('jpy').value || 0;
+  if(!twd && !jpy){ alert('請輸入金額'); return; }
+
+  const payload = {
+    action: editingId ? 'update' : 'add',
+    id: editingId || undefined,
+    date: $('date').value,
+    category: $('category').value,
+    item,
+    location: $('place').value.trim(),
+    paymentMethod: $('method').value,
+    jpy,
+    twd,
+    payer: selectedPayer
+  };
+
+  const btn = $('saveBtn');
+  btn.disabled = true;
+  btn.textContent = editingId ? '正在儲存修改…' : '正在寫入 Google 雲端…';
+  setStatus('正在同步…');
+
+  try{
+    await apiPost(payload);
+    resetForm();
+    await loadExpenses();
+  }catch(err){
+    alert('儲存失敗：' + err.message);
+    setStatus('同步失敗', false);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = '＋ 新增一筆';
+  }
 };
-if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
-renderPayerButtons(); render();
+
+function resetForm(){
+  editingId = null;
+  ['item','place','jpy','twd'].forEach(x => $(x).value = '');
+  $('saveBtn').textContent = '＋ 新增一筆';
+}
+
+function money(n){ return Math.round(Number(n)||0).toLocaleString('zh-TW'); }
+function esc(s=''){
+  return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+
+function render(){
+  const total = expenses.reduce((a,b)=>a+(+b.twd||0),0);
+  const ym = localToday().slice(0,7);
+  const month = expenses.filter(e=>(e.date||'').startsWith(ym)).reduce((a,b)=>a+(+b.twd||0),0);
+
+  $('totalTWD').textContent = 'NT$' + money(total);
+  $('monthTWD').textContent = 'NT$' + money(month);
+  $('count').textContent = expenses.length + ' 筆';
+
+  const stats = {};
+  expenses.forEach(e => stats[e.payer||'未填'] = (stats[e.payer||'未填']||0) + (+e.twd||0));
+  $('payerStats').innerHTML = Object.keys(stats).length
+    ? Object.entries(stats).sort((a,b)=>b[1]-a[1]).map(([p,v]) =>
+        `<div style="display:flex;justify-content:space-between;padding:6px 0"><span>${esc(p)}</span><strong>NT$${money(v)}</strong></div>`
+      ).join('')
+    : '尚無資料';
+
+  $('list').innerHTML = expenses.length ? expenses.map(e => `
+    <div class="row">
+      <div class="topline">
+        <div>
+          <div class="item">${esc(e.item)}</div>
+          <div class="meta">${esc(e.date)}｜${esc(e.category||'其他')}｜${esc(e.place||'未填地點')}<br>
+          ${esc(e.method)}｜付款人：${esc(e.payer||'未填')}</div>
+        </div>
+        <div class="amt">NT$${money(e.twd)}${e.jpy?`<div class="meta" style="text-align:right">¥${money(e.jpy)}</div>`:''}</div>
+      </div>
+      <div class="actions">
+        <button class="secondary" onclick="editExpense('${esc(e.id)}')">修改</button>
+        <button class="danger" onclick="deleteExpense('${esc(e.id)}')">刪除</button>
+      </div>
+    </div>`).join('')
+    : '<div class="empty">Google 雲端目前還沒有紀錄。</div>';
+}
+
+window.editExpense = id => {
+  const e = expenses.find(x => String(x.id) === String(id));
+  if(!e) return;
+  editingId = String(e.id);
+  $('date').value = e.date || localToday();
+  $('category').value = e.category || '其他';
+  $('item').value = e.item || '';
+  $('place').value = e.place || '';
+  $('method').value = e.method || '刷卡';
+  $('jpy').value = e.jpy || '';
+  $('twd').value = e.twd || '';
+  selectedPayer = e.payer || payers[0] || '我';
+  if(selectedPayer && !payers.includes(selectedPayer)){
+    payers = [selectedPayer, ...payers].slice(0,4);
+  }
+  renderPayerButtons();
+  if(e.jpy) $('jpyArea').classList.remove('hidden');
+  $('saveBtn').textContent = '✓ 儲存修改';
+  window.scrollTo({top:0, behavior:'smooth'});
+};
+
+window.deleteExpense = async id => {
+  if(!confirm('確定要刪除這筆 Google 雲端紀錄嗎？')) return;
+  try{
+    setStatus('正在刪除…');
+    await apiPost({action:'delete', id:String(id)});
+    await loadExpenses();
+  }catch(err){
+    alert('刪除失敗：' + err.message);
+    setStatus('刪除失敗', false);
+  }
+};
+
+$('clearBtn').onclick = async () => {
+  if(!expenses.length) return;
+  if(!confirm(`確定要刪除 Google 雲端全部 ${expenses.length} 筆資料嗎？此動作無法復原。`)) return;
+  const typed = prompt('為避免誤刪，請輸入：全部刪除');
+  if(typed !== '全部刪除') return;
+
+  $('clearBtn').disabled = true;
+  try{
+    for(const e of [...expenses]){
+      await apiPost({action:'delete', id:String(e.id)});
+    }
+    await loadExpenses();
+  }catch(err){
+    alert('部分資料可能未刪除完成：' + err.message);
+    await loadExpenses();
+  }finally{
+    $('clearBtn').disabled = false;
+  }
+};
+
+$('exportBtn').onclick = () => {
+  const rows = [['日期','分類','項目','地點','付款方式','日幣','台幣','付款人'],
+    ...expenses.map(e=>[e.date,e.category,e.item,e.place,e.method,e.jpy,e.twd,e.payer])];
+  const csv = '\ufeff' + rows.map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '我的日常記帳_Google雲端.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+function checkMigration(){
+  if(localStorage.getItem(MIGRATED_KEY)) return;
+  let old = [];
+  try{ old = JSON.parse(localStorage.getItem(OLD_KEY)||'[]'); }catch(e){}
+  if(Array.isArray(old) && old.length){
+    $('migrationBox').classList.remove('hidden');
+    $('migrateBtn').textContent = `☁️ 將舊資料 ${old.length} 筆上傳到 Google 雲端`;
+  }
+}
+
+$('migrateBtn').onclick = async () => {
+  let old = [];
+  try{ old = JSON.parse(localStorage.getItem(OLD_KEY)||'[]'); }catch(e){}
+  if(!old.length) return;
+  if(!confirm(`要將這台裝置原本的 ${old.length} 筆記帳資料上傳到 Google 雲端嗎？只需執行一次。`)) return;
+
+  const btn = $('migrateBtn');
+  btn.disabled = true;
+  try{
+    for(let i=0;i<old.length;i++){
+      const e = old[i];
+      setStatus(`正在上傳舊資料 ${i+1}/${old.length}…`);
+      await apiPost({
+        action:'add',
+        date:e.date || '',
+        category:e.category || '其他',
+        item:e.item || '',
+        location:e.place || '',
+        paymentMethod:e.method || '',
+        jpy:Number(e.jpy)||0,
+        twd:Number(e.twd)||0,
+        payer:e.payer || ''
+      });
+    }
+    localStorage.setItem(MIGRATED_KEY, new Date().toISOString());
+    $('migrationBox').classList.add('hidden');
+    alert('舊資料已上傳完成。原本的本機資料暫時保留，不會自動刪除。');
+    await loadExpenses();
+  }catch(err){
+    alert('上傳中斷：' + err.message + '。請先不要重複按上傳，避免產生重複資料。');
+    setStatus('舊資料上傳未完成', false);
+  }finally{
+    btn.disabled = false;
+  }
+};
+
+renderPayerButtons();
+render();
+checkMigration();
+loadExpenses();
 </script>
 </body>
 </html>
